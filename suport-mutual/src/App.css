@@ -1,0 +1,388 @@
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+
+:root {
+  font-family: 'DM Sans', sans-serif;
+  color: #24372f;
+  background: #f6f7f2;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: #f6f7f2;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.9fr);
+  align-items: start;
+  gap: 22px;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 32px;
+}
+
+.app-header,
+.app-footer,
+.app > .error-message,
+.app > .success-message,
+.app > p[role='status'] {
+  grid-column: 1 / -1;
+}
+
+.app-header {
+  padding: 14px 0 24px;
+  border-bottom: 1px solid #e3e8df;
+}
+
+.app-header h1 {
+  margin: 0;
+  color: #214b38;
+  font-family: 'Manrope', sans-serif;
+  font-size: clamp(30px, 4vw, 44px);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -1.5px;
+}
+
+.app-header p {
+  max-width: 700px;
+  margin: 12px 0 0;
+  color: #65746a;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.panel {
+  min-width: 0;
+  padding: 22px;
+  overflow: hidden;
+  border: 1px solid #e5e9e1;
+  border-radius: 17px;
+  background: #fff;
+  box-shadow: 0 5px 22px rgb(40 60 40 / 4%);
+}
+
+.panel h2 {
+  margin: 0;
+  color: #24372f;
+  font-family: 'Manrope', sans-serif;
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: -0.4px;
+}
+
+.panel > p:not(.location-status) {
+  color: #718075;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.map-wrapper {
+  width: 100%;
+  height: 510px;
+  min-height: 340px;
+  margin-top: 18px;
+  overflow: hidden;
+  border: 1px solid #e1e8de;
+  border-radius: 12px;
+  background: #e7eee5;
+}
+
+.map-wrapper .leaflet-container {
+  width: 100%;
+  height: 100%;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.leaflet-container a {
+  color: #286442;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 10px;
+}
+
+.leaflet-popup-content {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.leaflet-popup-content button {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: #e7f1e7;
+  color: #26533a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.location-status {
+  margin: 14px 0;
+  padding: 12px;
+  overflow-wrap: anywhere;
+  border: 1px dashed #d5ddd2;
+  border-radius: 10px;
+  background: #f8f9f5;
+  color: #68786e;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.filters button {
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid #e0e6dd;
+  border-radius: 9px;
+  background: #fff;
+  color: #53645a;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.filters button:hover {
+  border-color: #9ab9a0;
+  background: #f3f7f1;
+}
+
+.filters span {
+  margin-left: auto;
+  color: #718075;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.task-form {
+  display: grid;
+  gap: 17px;
+  margin-top: 22px;
+}
+
+.task-form label {
+  display: grid;
+  gap: 8px;
+  color: #42574a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.task-form input,
+.task-form select,
+.task-form textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #dfe5dc;
+  border-radius: 9px;
+  outline: none;
+  background: #fff;
+  color: #24372f;
+  font-size: 13px;
+  font-weight: 400;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.task-form input::placeholder,
+.task-form textarea::placeholder {
+  color: #9aa49b;
+}
+
+.task-form input:focus,
+.task-form select:focus,
+.task-form textarea:focus {
+  border-color: #528965;
+  box-shadow: 0 0 0 3px rgb(82 137 101 / 12%);
+}
+
+.task-form textarea {
+  min-height: 110px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.task-form button {
+  width: 100%;
+  min-height: 47px;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: #286442;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.task-form button:hover:not(:disabled) {
+  background: #1c5033;
+}
+
+.task-form button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.error-message,
+.success-message,
+.app > p[role='status'] {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.error-message {
+  border: 1px solid #f3c4c0;
+  background: #fff3f2;
+  color: #b42318;
+}
+
+.success-message {
+  border: 1px solid #c9e5d1;
+  background: #effaf2;
+  color: #16794b;
+}
+
+.app > p[role='status'] {
+  background: #f1f4ee;
+  color: #53645a;
+}
+
+.app-footer {
+  padding-top: 8px;
+  border-top: 1px solid #e3e8df;
+}
+
+.app-footer p {
+  max-width: 850px;
+  margin: 0;
+  color: #7b877e;
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+@media (max-width: 900px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+    padding: 20px 22px;
+  }
+
+  .app-header,
+  .app-footer,
+  .app > .error-message,
+  .app > .success-message,
+  .app > p[role='status'] {
+    grid-column: 1;
+  }
+
+  .map-wrapper {
+    height: 440px;
+  }
+}
+
+@media (max-width: 520px) {
+  .app {
+    gap: 14px;
+    padding: 12px 14px 20px;
+  }
+
+  .app-header {
+    padding: 12px 0 18px;
+  }
+
+  .app-header h1 {
+    font-size: 30px;
+    letter-spacing: -1px;
+  }
+
+  .app-header p {
+    font-size: 13px;
+  }
+
+  .panel {
+    padding: 16px;
+    border-radius: 13px;
+  }
+
+  .panel h2 {
+    font-size: 17px;
+  }
+
+  .map-wrapper {
+    height: 390px;
+    min-height: 320px;
+  }
+
+  .filters {
+    gap: 6px;
+  }
+
+  .filters button {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+
+  .filters span {
+    width: 100%;
+    margin: 4px 0 0;
+  }
+
+  .task-form {
+    gap: 15px;
+  }
+}
+
+
