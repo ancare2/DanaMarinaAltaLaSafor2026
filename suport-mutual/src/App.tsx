@@ -29,6 +29,29 @@ type Task = {
   completed_at: string | null;
 };
 
+// Garanteix que cada visitant tinga una sessió de Supabase Auth.
+// Els usuaris anònims de Supabase Auth tenen un UUID i el rol "authenticated".
+async function ensureAnonymousUser() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+
+  const existingUser = sessionData.session?.user;
+  if (existingUser) return existingUser;
+
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if (error) {
+    throw new Error(
+      `No s'ha pogut iniciar la sessió anònima. Comprova que Anonymous Sign-Ins estiga activat en Supabase. ${error.message}`,
+    );
+  }
+
+  if (!data.user) {
+    throw new Error('Supabase no ha retornat cap usuari per a la sessió anònima.');
+  }
+
+  return data.user;
+}
+
 function MapClickHandler({
   onChoose,
 }: {
@@ -39,8 +62,19 @@ function MapClickHandler({
       onChoose(event.latlng.lat, event.latlng.lng);
     },
   });
-
   return null;
+}
+
+function normaliseMunicipality(value: string) {
+  return value.trim().toLocaleLowerCase('ca');
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat('ca-ES', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(value));
 }
 
 export default function App() {
@@ -66,10 +100,7 @@ export default function App() {
       .in('status', ['open', 'claimed', 'in_progress'])
       .order('created_at', { ascending: false });
 
-    if (queryError) {
-      throw queryError;
-    }
-
+    if (queryError) throw queryError;
     setTasks((data ?? []) as Task[]);
   }, []);
 
@@ -81,26 +112,10 @@ export default function App() {
       setError('');
 
       try {
-        const { data: sessionData, error: sessionError } =
-          await supabase.auth.getSession();
+        const currentUser = await ensureAnonymousUser();
+        if (!mounted) return;
 
-        if (sessionError) throw sessionError;
-
-        let currentUser = sessionData.session?.user ?? null;
-
-        if (!currentUser) {
-          const { data, error: signInError } =
-            await supabase.auth.signInAnonymously();
-
-          if (signInError) throw signInError;
-          currentUser = data.user;
-        }
-
-        if (!currentUser) {
-          throw new Error('No s’ha pogut crear la sessió anònima.');
-        }
-
-        if (mounted) setUserId(currentUser.id);
+        setUserId(currentUser.id);
 
         const { data: taskData, error: queryError } = await supabase
           .from('tasks')
@@ -109,10 +124,9 @@ export default function App() {
           .order('created_at', { ascending: false });
 
         if (queryError) throw queryError;
-
         if (mounted) setTasks((taskData ?? []) as Task[]);
       } catch (err) {
-        console.error(err);
+        console.error('Error en iniciar l’aplicació:', err);
         if (mounted) {
           setError(
             err instanceof Error
@@ -126,7 +140,6 @@ export default function App() {
     }
 
     void initialise();
-
     return () => {
       mounted = false;
     };
@@ -139,9 +152,7 @@ export default function App() {
       const parts = [details.message, details.details, details.hint]
         .filter((part) => typeof part === 'string' && part.trim().length > 0)
         .map(String);
-      if (parts.length > 0) {
-        return details.code ? `[${String(details.code)}] ${parts.join(' — ')}` : parts.join(' — ');
-      }
+      if (parts.length > 0) return details.code ? `[${String(details.code)}] ${parts.join(' — ')}` : parts.join(' — ');
     }
     return fallback;
   }
@@ -151,26 +162,27 @@ export default function App() {
     setError('');
     setMessage('');
 
-    if (!userId) {
-      setError('No hi ha una sessió anònima activa. Recarrega la pàgina.');
-      return;
-    }
-
     if (latitude === null || longitude === null) {
       setError('Selecciona una ubicació al mapa abans de publicar.');
       return;
     }
-
     if (title.trim().length < 3) {
       setError('El títol ha de tindre almenys 3 caràcters.');
       return;
     }
+    if (municipality.trim().length < 2) {
+      setError('Indica el municipi perquè les persones puguen trobar l’ajuda local.');
+      return;
+    }
 
     setSaving(true);
-
     try {
+      // Revalida la sessió just abans de publicar i usa l'UUID real de Supabase.
+      const currentUser = await ensureAnonymousUser();
+      setUserId(currentUser.id);
+
       const { error: insertError } = await supabase.from('tasks').insert({
-        created_by: userId,
+        created_by: currentUser.id,
         title: title.trim(),
         description: description.trim(),
         municipality: municipality.trim(),
@@ -187,7 +199,11 @@ export default function App() {
       setDescription('');
       setMunicipality('');
       setType('need');
-      setMessage('Publicació creada correctament.');
+      setMessage(
+        type === 'need'
+          ? 'Necessitat publicada. Les ofertes del mateix municipi apareixeran com a possibles coincidències.'
+          : 'Oferta publicada. Ara es mostrarà al costat de les necessitats del mateix municipi.',
+      );
     } catch (err: unknown) {
       console.error('Error en publicar la tasca:', err);
       setError(getErrorMessage(err, 'No s’ha pogut publicar la tasca.'));
@@ -197,70 +213,117 @@ export default function App() {
   }
 
   async function completeTask(task: Task) {
-    if (task.created_by !== userId) {
-      setError('Només qui ha publicat aquesta tasca pot completar-la.');
+    if (task.type !== 'need') {
+      setError('Només es poden marcar com a completades les necessitats d’ajuda.');
       return;
     }
-
+    if (task.created_by !== userId) {
+      setError('Només qui ha publicat aquesta tasca pot marcar-la com a completada.');
+      return;
+    }
     setError('');
     setMessage('');
-
     try {
       const { error: updateError } = await supabase
         .from('tasks')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-        })
+        .update({ status: 'completed', completed_at: new Date().toISOString() })
         .eq('id', task.id);
-
       if (updateError) throw updateError;
-
       await loadTasks();
-      setMessage('Tasca marcada com a completada.');
+      setMessage('Publicació marcada com a completada.');
     } catch (err: unknown) {
       console.error('Error en completar la tasca:', err);
-      setError(getErrorMessage(err, 'No s’ha pogut marcar la tasca com a completada.'));
+      setError(getErrorMessage(err, 'No s’ha pogut completar la publicació.'));
     }
   }
 
-  const visibleTasks = tasks.filter(
-    (task) => filter === 'all' || task.type === filter,
-  );
+  const visibleTasks = tasks.filter((task) => filter === 'all' || task.type === filter);
+  const needs = visibleTasks.filter((task) => task.type === 'need');
+  const offers = visibleTasks.filter((task) => task.type === 'offer');
+  const allNeeds = tasks.filter((task) => task.type === 'need');
+
+  function renderTaskCard(task: Task) {
+    const matchingNeeds = task.type === 'offer' && task.municipality
+      ? allNeeds.filter((need) =>
+          normaliseMunicipality(need.municipality) === normaliseMunicipality(task.municipality) &&
+          need.id !== task.id)
+      : [];
+
+    return (
+      <article className={`task-card task-card--${task.type}`} key={task.id}>
+        <div className="task-card__topline">
+          <span className={`task-kind task-kind--${task.type}`}>
+            {task.type === 'need' ? 'Necessita ajuda' : 'Ofereix ajuda'}
+          </span>
+          <span className="task-date">{formatDate(task.created_at)}</span>
+        </div>
+        <h3>{task.title}</h3>
+        <p className="task-municipality"><span aria-hidden="true">⌖</span> {task.municipality || 'Municipi no indicat'}</p>
+        {task.description && <p className="task-description">{task.description}</p>}
+
+        {task.type === 'offer' && (
+          <div className="matching-needs">
+            <h4>Necessitats del mateix municipi</h4>
+            {matchingNeeds.length > 0 ? (
+              <ul>
+                {matchingNeeds.slice(0, 3).map((need) => (
+                  <li key={need.id}>
+                    <strong>{need.title}</strong>
+                    <span>{need.municipality}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="matching-empty">Encara no hi ha necessitats publicades amb aquest municipi. Si una persona necessita ajuda ací, la seua publicació apareixerà en aquesta secció.</p>
+            )}
+          </div>
+        )}
+
+        <div className="task-card__footer">
+          <span className="task-owner">{task.created_by === userId ? 'Publicat per tu' : 'Publicació comunitària'}</span>
+          {task.created_by === userId && task.type === 'need' && (
+            <button className="button button--small button--quiet" type="button" onClick={() => void completeTask(task)}>
+              Marcar necessitat com a completada
+            </button>
+          )}
+        </div>
+      </article>
+    );
+  }
 
   return (
     <main className="app">
       <header className="app-header">
-        <h1>Suport mutu DANA</h1>
-        <p>Marina Alta i la Safor · Necessitats, ofertes i ajuda comunitària</p>
+        <div className="eyebrow">Xarxa veïnal · Marina Alta i la Safor</div>
+        <h1>Suport mutu <span>DANA ADAM</span></h1>
+        <p>Connectem les persones que necessiten ajuda amb les persones que poden oferir-la, municipi a municipi.</p>
+        <div className="header-stats">
+          <div><strong>{tasks.filter((task) => task.type === 'need').length}</strong><span>necessitats obertes</span></div>
+          <div><strong>{tasks.filter((task) => task.type === 'offer').length}</strong><span>ofertes d’ajuda</span></div>
+          <div><strong>{new Set(tasks.map((task) => task.municipality.trim()).filter(Boolean).map(normaliseMunicipality)).size}</strong><span>municipis amb activitat</span></div>
+        </div>
       </header>
 
-      <section className="panel">
-        <h2>Mapa de suport mutu</h2>
-        <p>
-          Selecciona un punt del mapa per indicar on es necessita o s’ofereix
-          ajuda.
-        </p>
+      <section className="panel map-panel">
+        <div className="section-heading">
+          <div>
+            <span className="section-kicker">Vista territorial</span>
+            <h2>Mapa de suport mutu</h2>
+            <p>Selecciona el punt on es necessita o s’ofereix ajuda. Els punts rojos són necessitats i els verds són ofertes.</p>
+          </div>
+          <div className="map-legend">
+            <span><i className="legend-dot legend-dot--need" /> Necessitat</span>
+            <span><i className="legend-dot legend-dot--offer" /> Oferta</span>
+          </div>
+        </div>
 
         <div className="map-wrapper">
-          <MapContainer
-            center={[38.84, -0.12]}
-            zoom={10}
-            style={{ height: '100%', minHeight: '380px', width: '100%' }}
-            scrollWheelZoom
-          >
+          <MapContainer center={[38.84, -0.12]} zoom={10} style={{ height: '100%', minHeight: '360px', width: '100%' }} scrollWheelZoom>
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-
-            <MapClickHandler
-              onChoose={(lat, lng) => {
-                setLatitude(lat);
-                setLongitude(lng);
-              }}
-            />
-
+            <MapClickHandler onChoose={(lat, lng) => { setLatitude(lat); setLongitude(lng); }} />
             {visibleTasks.map((task) => (
               <CircleMarker
                 key={task.id}
@@ -269,124 +332,121 @@ export default function App() {
                 pathOptions={{
                   color: task.type === 'need' ? '#b42318' : '#16794b',
                   fillColor: task.type === 'need' ? '#ef4444' : '#22c55e',
-                  fillOpacity: 0.8,
+                  fillOpacity: 0.82,
+                  weight: 2,
                 }}
               >
                 <Popup>
                   <strong>{task.title}</strong>
-                  <p>{task.type === 'need' ? 'Necessitat' : 'Oferta d’ajuda'}</p>
-                  {task.municipality && <p>{task.municipality}</p>}
+                  <p>{task.type === 'need' ? 'Necessita ajuda' : 'Ofereix ajuda'}</p>
+                  <p>{task.municipality || 'Municipi no indicat'}</p>
                   {task.description && <p>{task.description}</p>}
-                  {task.created_by === userId && (
-                    <button type="button" onClick={() => void completeTask(task)}>
-                      Marcar com a completada
-                    </button>
+                  {task.created_by === userId && task.type === 'need' && (
+                    <button type="button" onClick={() => void completeTask(task)}>Marcar necessitat com a completada</button>
                   )}
                 </Popup>
               </CircleMarker>
             ))}
-
             {latitude !== null && longitude !== null && (
-              <CircleMarker
-                center={[latitude, longitude]}
-                radius={6}
-                pathOptions={{
-                  color: '#1d4ed8',
-                  fillColor: '#60a5fa',
-                  fillOpacity: 0.8,
-                }}
-              >
+              <CircleMarker center={[latitude, longitude]} radius={6} pathOptions={{ color: '#1d4ed8', fillColor: '#60a5fa', fillOpacity: 0.85 }}>
                 <Popup>Ubicació seleccionada per a la nova publicació</Popup>
               </CircleMarker>
             )}
           </MapContainer>
         </div>
-
         <p className="location-status">
           {latitude !== null && longitude !== null
-            ? `Ubicació seleccionada: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
-            : 'Encara no has seleccionat cap ubicació.'}
+            ? `Punt seleccionat: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} · Fes clic al mapa per canviar-lo.`
+            : 'Selecciona una ubicació al mapa.'}
         </p>
-
         <div className="filters" aria-label="Filtrar publicacions">
-          <button type="button" onClick={() => setFilter('all')}>
-            Totes
-          </button>
-          <button type="button" onClick={() => setFilter('need')}>
-            Necessitats
-          </button>
-          <button type="button" onClick={() => setFilter('offer')}>
-            Ofertes
-          </button>
-          <span>{visibleTasks.length} publicacions</span>
+          <button className={filter === 'all' ? 'is-active' : ''} type="button" onClick={() => setFilter('all')}>Totes <span>{tasks.length}</span></button>
+          <button className={filter === 'need' ? 'is-active' : ''} type="button" onClick={() => setFilter('need')}>Necessitats <span>{tasks.filter((task) => task.type === 'need').length}</span></button>
+          <button className={filter === 'offer' ? 'is-active' : ''} type="button" onClick={() => setFilter('offer')}>Ofertes <span>{tasks.filter((task) => task.type === 'offer').length}</span></button>
         </div>
       </section>
 
-      <section className="panel">
-        <h2>Publica una necessitat o una oferta</h2>
-
+      <section className="panel publish-panel">
+        <div className="section-heading">
+          <div>
+            <span className="section-kicker">Participa</span>
+            <h2>Publica al teu municipi</h2>
+            <p>Indica clarament què necessites o què pots oferir perquè siga més fàcil trobar una coincidència.</p>
+          </div>
+        </div>
         <form onSubmit={handleSubmit} className="task-form">
-          <label>
-            Tipus de publicació
-            <select
-              value={type}
-              onChange={(event) => setType(event.target.value as TaskType)}
-            >
-              <option value="need">Necessite ajuda</option>
-              <option value="offer">Oferisc ajuda</option>
-            </select>
+          <fieldset className="type-choice">
+            <legend>Què vols publicar?</legend>
+            <label className={type === 'need' ? 'type-choice__option selected' : 'type-choice__option'}>
+              <input type="radio" name="type" value="need" checked={type === 'need'} onChange={() => setType('need')} />
+              <span className="choice-icon choice-icon--need">↓</span>
+              <span><strong>Necessite ajuda</strong><small>Descriu què et fa falta.</small></span>
+            </label>
+            <label className={type === 'offer' ? 'type-choice__option selected' : 'type-choice__option'}>
+              <input type="radio" name="type" value="offer" checked={type === 'offer'} onChange={() => setType('offer')} />
+              <span className="choice-icon choice-icon--offer">＋</span>
+              <span><strong>Oferisc ajuda</strong><small>Descriu què pots aportar.</small></span>
+            </label>
+          </fieldset>
+
+          <label className="form-field">
+            <span>Títol breu</span>
+            <input value={title} onChange={(event) => setTitle(event.target.value)} required minLength={3} maxLength={120}
+              placeholder={type === 'need' ? 'Ex.: Necessitem aigua potable' : 'Ex.: Puc portar aliments i aigua'} />
           </label>
 
-          <label>
-            Títol
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              required
-              minLength={3}
-              maxLength={120}
-              placeholder="Ex.: Necessitem aigua potable"
-            />
+          <label className="form-field">
+            <span>Municipi <b>obligatori</b></span>
+            <input value={municipality} onChange={(event) => setMunicipality(event.target.value)} required minLength={2} maxLength={100}
+              placeholder="Ex.: Oliva, Pego, Gandia…" />
+            <small>Les ofertes i necessitats del mateix municipi es mostraran juntes per facilitar el contacte.</small>
           </label>
 
-          <label>
-            Municipi
-            <input
-              value={municipality}
-              onChange={(event) => setMunicipality(event.target.value)}
-              maxLength={100}
-              placeholder="Ex.: Oliva"
-            />
+          <label className="form-field">
+            <span>Detalls</span>
+            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} maxLength={2000}
+              placeholder={type === 'need' ? 'Què necessites, quina quantitat i quan? No inclogues dades personals.' : 'Què pots oferir, en quin horari i amb quina disponibilitat?'} />
           </label>
 
-          <label>
-            Descripció
-            <textarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              rows={4}
-              maxLength={2000}
-              placeholder="Explica què cal o quina ajuda pots oferir."
-            />
-          </label>
-
-          <button type="submit" disabled={saving || loading || !userId}>
-            {saving ? 'Publicant…' : 'Publicar al mapa'}
+          <button className="button button--primary" type="submit" disabled={saving || loading || !userId}>
+            {saving ? 'Publicant…' : type === 'need' ? 'Publicar necessitat' : 'Publicar oferta d’ajuda'}
           </button>
         </form>
       </section>
 
-      {loading && <p role="status">Connectant i carregant publicacions…</p>}
+      <section className="task-board">
+        <div className="board-heading">
+          <div><span className="section-kicker">Tauler comunitari</span><h2>Qui necessita ajuda i qui en pot oferir?</h2></div>
+          <span className="board-count">{visibleTasks.length} publicacions actives</span>
+        </div>
+        <div className="task-columns">
+          {(filter === 'all' || filter === 'need') && (
+            <section className="task-column">
+              <div className="task-column__heading task-column__heading--need">
+                <span className="column-symbol">↓</span><div><h3>Es necessita ajuda</h3><p>Necessitats pendents de cobrir</p></div><strong>{needs.length}</strong>
+              </div>
+              {needs.length ? <div className="task-list">{needs.map(renderTaskCard)}</div> : <div className="empty-state"><strong>No hi ha necessitats publicades</strong><p>Quan algú demane ajuda, apareixerà ací.</p></div>}
+            </section>
+          )}
+          {(filter === 'all' || filter === 'offer') && (
+            <section className="task-column">
+              <div className="task-column__heading task-column__heading--offer">
+                <span className="column-symbol">＋</span><div><h3>S’ofereix ajuda</h3><p>Recursos i suport disponibles</p></div><strong>{offers.length}</strong>
+              </div>
+              {offers.length ? <div className="task-list">{offers.map(renderTaskCard)}</div> : <div className="empty-state"><strong>No hi ha ofertes publicades</strong><p>Quan algú oferisca ajuda, apareixerà ací.</p></div>}
+            </section>
+          )}
+        </div>
+      </section>
+
+      {loading && <p role="status" className="notice">Connectant i carregant publicacions…</p>}
       {error && <p role="alert" className="error-message">{error}</p>}
       {message && <p role="status" className="success-message">{message}</p>}
 
       <footer className="app-footer">
-        <p>
-          Espai comunitari de suport mutu. No publiques dades personals,
-          adreces particulars ni informació sensible de persones afectades.
-        </p>
+        <strong>Una xarxa de suport, poble a poble.</strong>
+        <p>Per protegir les persones afectades, no publiques adreces particulars, telèfons ni altra informació personal o sensible.</p>
       </footer>
     </main>
   );
-
 }
